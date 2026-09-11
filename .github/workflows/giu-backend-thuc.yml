@@ -1,0 +1,102 @@
+# Giữ backend Render thức — BẢN CHẠY VÒNG LẶP
+#
+# ĐẶT FILE NÀY TRONG MỘT REPO CÔNG KHAI RIÊNG, KHÔNG PHẢI repo an-hung-finance.
+# Lý do ở ngay dưới.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# VÌ SAO BẢN CŨ HỎNG
+#
+# Bản cũ đặt `cron: "*/14 1-15 * * 1-5"` = 60 lần/ngày. Thực tế đo ngày
+# 10/09/2026 trên trang Actions: **4-5 lần/ngày**. Các mốc thật:
+#     09/09 01:03 → 12:37 → 17:05 → 21:32 → 10/09 00:57
+# Khoảng cách 3 đến 11 tiếng rưỡi. Mà Render ngủ sau 15 PHÚT.
+# Nghĩa là keepalive phủ được 15 phút trong mỗi 4-5 tiếng — coi như không có.
+#
+# Không phải hết phút Actions (mọi lần chạy đều xanh, 8-43 giây). Nguyên nhân
+# là lịch cron của GitHub chạy chung hàng đợi với toàn bộ job của mọi người;
+# tài liệu của họ ghi thẳng "schedule events may be delayed during periods of
+# high load". Lịch càng dày càng bị thả nhiều. ĐỔI CRON KHÔNG CỨU ĐƯỢC.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# CÁCH NÀY KHÁC Ở ĐÂU
+#
+# Không nhờ cron đếm nhịp nữa. Cron chỉ làm đúng một việc: KHỞI ĐỘNG job.
+# Nhịp 10 phút do vòng `while` bên trong job tự giữ — GitHub không xen vào được.
+#
+# 4 lần/ngày, mỗi lần chạy 5 tiếng, GỐI ĐẦU NHAU 1 TIẾNG:
+#     08:00 VN ├────────5h────────┤ 13:00
+#     12:00 VN      ├────────5h────────┤ 17:00
+#     16:00 VN           ├────────5h────────┤ 21:00
+#     20:00 VN                ├────────5h────────┤ 01:00
+# Một lần nổ trễ nửa tiếng cũng không thủng, vì job trước vẫn đang ping.
+#
+# VÌ SAO PHẢI LÀ REPO CÔNG KHAI: cách này tiêu ~1.200 phút Actions/ngày.
+# Repo riêng tư chỉ có 2.000 phút/THÁNG -> cháy trong hai ngày.
+# Repo công khai thì phút chạy MIỄN PHÍ KHÔNG GIỚI HẠN.
+#
+# VÀ VÌ SAO PHẢI LÀ REPO RIÊNG, TÁCH KHỎI an-hung-finance:
+# repo kia chứa token FireAnt hard-code trong main.py, screener, vị thế đang
+# nắm giữ. TUYỆT ĐỐI không mở công khai. File này thì không có gì bí mật —
+# chỉ một URL mà trình duyệt của bất kỳ ai vào web cũng đã gọi công khai.
+# ─────────────────────────────────────────────────────────────────────────
+
+name: Giu backend thuc
+
+on:
+  schedule:
+    # Giờ VN = UTC+7.  01:00 UTC = 08:00 VN.
+    - cron: "0 1,5,9,13 * * 1-5"
+  workflow_dispatch:        # bấm chạy tay khi cần đánh thức ngay
+
+permissions:
+  contents: write           # chỉ để ghi nhip.txt, xem ghi chú ở bước cuối
+
+concurrency:
+  # KHÔNG dùng cancel-in-progress: chỗ gối đầu 1 tiếng chính là thứ đỡ cho
+  # những lần nổ trễ. Hủy job cũ khi job mới vào là tự tay cắt mất tấm đệm đó.
+  group: giu-thuc
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 320          # 5h20 — trần cứng, trên mức vòng lặp 5 tiếng
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ping mỗi 10 phút trong 5 tiếng
+        run: |
+          URL="https://an-hung-finance-backend.onrender.com/api/cache/status"
+          NHIP=600                                  # giây — Render ngủ sau 15 phút
+          HET=$(( $(date +%s) + 5*3600 ))
+          n=0
+          while [ "$(date +%s)" -lt "$HET" ]; do
+            n=$((n+1))
+            # --max-time 120 vì cold start có thể lâu. `|| true` để một lượt
+            # hỏng không giết cả vòng lặp — thà ping hụt một nhịp còn hơn tắt
+            # job rồi để backend ngủ suốt bốn tiếng còn lại.
+            KQ=$(curl -sS --max-time 120 -w ' [HTTP %{http_code} · %{time_total}s]' "$URL" 2>&1 || true)
+            echo "$(TZ=Asia/Ho_Chi_Minh date '+%d/%m %H:%M:%S') · lần $n · $KQ"
+            # Nhịp cuối thì thoát luôn, đừng ngủ thêm 10 phút vô ích.
+            [ "$(( $(date +%s) + NHIP ))" -ge "$HET" ] && break
+            sleep "$NHIP"
+          done
+          echo "Xong $n nhịp."
+
+      - name: Ghi nhịp tim (chống GitHub tự tắt lịch sau 60 ngày)
+        # GitHub TỰ TẮT lịch cron của repo công khai sau 60 ngày không có hoạt
+        # động nào. Repo này chẳng ai commit vào bao giờ -> đúng 60 ngày nữa là
+        # nó lặng lẽ chết, y như bản keepalive cũ, và không có thông báo gì.
+        #
+        # Nên mỗi lần chạy ghi lại một dòng thời gian. Đây là đai an toàn, KHÔNG
+        # phải bảo đảm: có báo cáo nói commit của github-actions[bot] không phải
+        # lúc nào cũng tính là hoạt động. Cứ 1-2 tháng anh vào bấm "Run workflow"
+        # một cái là chắc chắn nhất.
+        run: |
+          date -u '+%Y-%m-%dT%H:%M:%SZ' > nhip.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add nhip.txt
+          git diff --cached --quiet && exit 0
+          git commit -m "nhip $(date -u '+%Y-%m-%d %H:%M')"
+          git push || true
