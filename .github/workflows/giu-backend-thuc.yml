@@ -1,80 +1,105 @@
-# Giữ backend Render thức — BẢN CHẠY VÒNG LẶP
+# Giữ backend Render thức — BẢN 3 (17/09/2026)
 #
-# ĐẶT FILE NÀY TRONG MỘT REPO CÔNG KHAI RIÊNG, KHÔNG PHẢI repo an-hung-finance.
-# Lý do ở ngay dưới.
-#
-# ─────────────────────────────────────────────────────────────────────────
-# VÌ SAO BẢN CŨ HỎNG
-#
-# Bản cũ đặt `cron: "*/14 1-15 * * 1-5"` = 60 lần/ngày. Thực tế đo ngày
-# 10/09/2026 trên trang Actions: **4-5 lần/ngày**. Các mốc thật:
-#     09/09 01:03 → 12:37 → 17:05 → 21:32 → 10/09 00:57
-# Khoảng cách 3 đến 11 tiếng rưỡi. Mà Render ngủ sau 15 PHÚT.
-# Nghĩa là keepalive phủ được 15 phút trong mỗi 4-5 tiếng — coi như không có.
-#
-# Không phải hết phút Actions (mọi lần chạy đều xanh, 8-43 giây). Nguyên nhân
-# là lịch cron của GitHub chạy chung hàng đợi với toàn bộ job của mọi người;
-# tài liệu của họ ghi thẳng "schedule events may be delayed during periods of
-# high load". Lịch càng dày càng bị thả nhiều. ĐỔI CRON KHÔNG CỨU ĐƯỢC.
+# ĐẶT TRONG REPO CÔNG KHAI AnHung2905/giu-backend-thuc,
+# đường dẫn .github/workflows/giu-backend-thuc.yml — ghi đè file cũ.
 #
 # ─────────────────────────────────────────────────────────────────────────
-# CÁCH NÀY KHÁC Ở ĐÂU
+# VÌ SAO BẢN 2 HỎNG — ĐO THẬT, KHÔNG SUY ĐOÁN
 #
-# Không nhờ cron đếm nhịp nữa. Cron chỉ làm đúng một việc: KHỞI ĐỘNG job.
-# Nhịp 10 phút do vòng `while` bên trong job tự giữ — GitHub không xen vào được.
+# Bản 2 thiết kế 4 lần/ngày, mỗi lần 5 tiếng, GỐI ĐẦU NHAU 1 TIẾNG. Đọc lịch
+# sử chạy thật (GitHub API, 8 lần chạy gần nhất kể từ 11/09):
 #
-# 4 lần/ngày, mỗi lần chạy 5 tiếng, GỐI ĐẦU NHAU 1 TIẾNG:
-#     08:00 VN ├────────5h────────┤ 13:00
-#     12:00 VN      ├────────5h────────┤ 17:00
-#     16:00 VN           ├────────5h────────┤ 21:00
-#     20:00 VN                ├────────5h────────┤ 01:00
-# Một lần nổ trễ nửa tiếng cũng không thủng, vì job trước vẫn đang ping.
+#     16/09  14:01 → 18:52 UTC
+#     16/09  05:38 → 10:28
+#     15/09  14:09 → 19:00
+#     15/09  05:48 → 10:39
+#     14/09  15:39 → 20:30
+#     14/09  05:47 → 10:38
 #
-# VÌ SAO PHẢI LÀ REPO CÔNG KHAI: cách này tiêu ~1.200 phút Actions/ngày.
-# Repo riêng tư chỉ có 2.000 phút/THÁNG -> cháy trong hai ngày.
-# Repo công khai thì phút chạy MIỄN PHÍ KHÔNG GIỚI HẠN.
+# KHÔNG MỘT CẶP NÀO GỐI ĐẦU. Và chỉ 2 lần/ngày thay vì 4 — hai mốc `0 1` và
+# `0 9` UTC gần như không bao giờ nổ. Sáng 17/09 lúc 09:50 VN, backend đã ngủ
+# từ 02:01 và phải khởi động lại từ đầu: cached 260/1414, updated None.
 #
-# VÀ VÌ SAO PHẢI LÀ REPO RIÊNG, TÁCH KHỎI an-hung-finance:
-# repo kia chứa token FireAnt hard-code trong main.py, screener, vị thế đang
-# nắm giữ. TUYỆT ĐỐI không mở công khai. File này thì không có gì bí mật —
-# chỉ một URL mà trình duyệt của bất kỳ ai vào web cũng đã gọi công khai.
+# HAI NGUYÊN NHÂN, phải sửa cả hai:
+#
+# 1. KHỐI `concurrency` TỰ TAY GIẾT CHỖ GỐI ĐẦU.
+#    Ghi chú bản 2 viết "KHÔNG dùng cancel-in-progress vì chỗ gối đầu 1 tiếng
+#    chính là thứ đỡ" — hiểu sai. Tài liệu GitHub:
+#      "if another job or workflow using the same concurrency group in the
+#       repository is in progress, the queued job or workflow will be pending"
+#      "any existing pending job or workflow in the same concurrency group
+#       will be canceled and the new queued job or workflow will take its place"
+#    Tức là có `concurrency` thì HAI LẦN CHẠY KHÔNG BAO GIỜ CÙNG LÚC — bất kể
+#    `cancel-in-progress` bật hay tắt. `cancel-in-progress: false` chỉ có nghĩa
+#    "đừng giết job đang chạy", chứ job mới vẫn phải XẾP HÀNG ĐỢI.
+#    Job chạy 5 tiếng mà cron 4 tiếng một lần -> mốc kế tiếp luôn rơi vào giữa
+#    job trước -> bị treo hàng đợi -> rồi bị mốc sau nữa hất đi.
+#    => BỎ HẲN khối `concurrency`. Chạy chồng nhau chính là thứ mình cần.
+#
+# 2. GITHUB VẪN THẢ BỚT LỊCH. Cái này không sửa được, chỉ bù được:
+#    - Dùng PHÚT LẺ (:37) thay vì :00 — phút tròn là lúc hàng đợi của GitHub
+#      đông nhất, và lịch càng đông càng bị thả.
+#    - Nhiều mốc hơn, mỗi mốc phủ 5h50 -> hụt một mốc vẫn còn mốc khác đỡ.
+#    - Bỏ lọc `1-5`: mốc 22:37 UTC thứ Sáu chính là 05:37 sáng thứ Bảy giờ VN,
+#      lọc theo thứ của UTC là lệch. Repo công khai không giới hạn phút chạy.
+#
+# LỊCH MỚI — giờ VN, mỗi lần phủ 5h50:
+#     05:37 ├─────5h50─────┤ 11:27
+#     07:37      ├─────5h50─────┤ 13:27
+#     09:37           ├─────5h50─────┤ 15:27
+#     11:37                ├─────5h50─────┤ 17:27
+#     15:37                          ├─────5h50─────┤ 21:27
+#     20:37                                    ├─────5h50─────┤ 02:27
+#
+# Phiên mở lúc 09:00 VN nay có BA mốc độc lập phủ qua (05:37 · 07:37 · 09:37).
+# Thả mất hai trong ba vẫn còn thức. Đêm 02:27–05:37 VN để ngủ, không ai xem.
+#
+# VÌ SAO PHẢI LÀ REPO CÔNG KHAI: cách này tiêu ~2.100 phút Actions/ngày. Repo
+# riêng tư chỉ có 2.000 phút/THÁNG. Repo công khai thì MIỄN PHÍ KHÔNG GIỚI HẠN.
+#
+# VÀ VÌ SAO PHẢI TÁCH KHỎI an-hung-finance: repo kia chứa token FireAnt
+# hard-code, screener, vị thế đang nắm giữ — TUYỆT ĐỐI không mở công khai.
+# File này không có gì bí mật: chỉ một URL mà trình duyệt của bất kỳ ai vào web
+# cũng đã gọi công khai.
+#
+# CÁCH KIỂM (bằng HỆ QUẢ, không bằng màu xanh):
+#   Sáng hôm sau mở https://an-hung-finance-backend.onrender.com/api/cache/status
+#   Thức sẵn thì `updated` KHÁC "None" và `loading` là false.
+#   `updated: None` = backend vừa mới dậy, tức đêm qua đã ngủ.
 # ─────────────────────────────────────────────────────────────────────────
 
 name: Giu backend thuc
 
 on:
   schedule:
-    # Giờ VN = UTC+7.  01:00 UTC = 08:00 VN.
-    - cron: "0 1,5,9,13 * * 1-5"
+    # Giờ VN = UTC+7. Phút :37 là cố ý — xem ghi chú (2) ở trên.
+    - cron: "37 22,0,2,4,8,13 * * *"
   workflow_dispatch:        # bấm chạy tay khi cần đánh thức ngay
 
 permissions:
   contents: write           # chỉ để ghi nhip.txt, xem ghi chú ở bước cuối
 
-concurrency:
-  # KHÔNG dùng cancel-in-progress: chỗ gối đầu 1 tiếng chính là thứ đỡ cho
-  # những lần nổ trễ. Hủy job cũ khi job mới vào là tự tay cắt mất tấm đệm đó.
-  group: giu-thuc
-  cancel-in-progress: false
+# KHÔNG CÓ `concurrency` — CỐ Ý. Xem nguyên nhân (1) ở trên. Thêm lại khối đó
+# là chặn hết chỗ gối đầu, và lịch tự trôi về 2 lần/ngày như bản 2.
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 320          # 5h20 — trần cứng, trên mức vòng lặp 5 tiếng
+    timeout-minutes: 355          # trần cứng, trên mức vòng lặp 5h50
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ping mỗi 10 phút trong 5 tiếng
+      - name: Ping mỗi 10 phút trong 5h50
         run: |
           URL="https://an-hung-finance-backend.onrender.com/api/cache/status"
           NHIP=600                                  # giây — Render ngủ sau 15 phút
-          HET=$(( $(date +%s) + 5*3600 ))
+          HET=$(( $(date +%s) + 350*60 ))
           n=0
           while [ "$(date +%s)" -lt "$HET" ]; do
             n=$((n+1))
             # --max-time 120 vì cold start có thể lâu. `|| true` để một lượt
             # hỏng không giết cả vòng lặp — thà ping hụt một nhịp còn hơn tắt
-            # job rồi để backend ngủ suốt bốn tiếng còn lại.
+            # job rồi để backend ngủ suốt mấy tiếng còn lại.
             KQ=$(curl -sS --max-time 120 -w ' [HTTP %{http_code} · %{time_total}s]' "$URL" 2>&1 || true)
             echo "$(TZ=Asia/Ho_Chi_Minh date '+%d/%m %H:%M:%S') · lần $n · $KQ"
             # Nhịp cuối thì thoát luôn, đừng ngủ thêm 10 phút vô ích.
@@ -86,12 +111,10 @@ jobs:
       - name: Ghi nhịp tim (chống GitHub tự tắt lịch sau 60 ngày)
         # GitHub TỰ TẮT lịch cron của repo công khai sau 60 ngày không có hoạt
         # động nào. Repo này chẳng ai commit vào bao giờ -> đúng 60 ngày nữa là
-        # nó lặng lẽ chết, y như bản keepalive cũ, và không có thông báo gì.
+        # nó lặng lẽ chết, y như bản keepalive đầu tiên, và không báo gì.
         #
-        # Nên mỗi lần chạy ghi lại một dòng thời gian. Đây là đai an toàn, KHÔNG
-        # phải bảo đảm: có báo cáo nói commit của github-actions[bot] không phải
-        # lúc nào cũng tính là hoạt động. Cứ 1-2 tháng anh vào bấm "Run workflow"
-        # một cái là chắc chắn nhất.
+        # Nhiều job chạy chồng nhau nên hai job có thể cùng push -> `pull --rebase`
+        # trước khi đẩy, và `|| true` để một lần hụt không làm đỏ cả run.
         run: |
           date -u '+%Y-%m-%dT%H:%M:%SZ' > nhip.txt
           git config user.name  "github-actions[bot]"
@@ -99,4 +122,5 @@ jobs:
           git add nhip.txt
           git diff --cached --quiet && exit 0
           git commit -m "nhip $(date -u '+%Y-%m-%d %H:%M')"
+          git pull --rebase --autostash || true
           git push || true
