@@ -1,9 +1,5 @@
 # Giữ backend Render thức — BẢN 3 (17/09/2026)
 #
-# ĐẶT TRONG REPO CÔNG KHAI AnHung2905/giu-backend-thuc,
-# đường dẫn .github/workflows/giu-backend-thuc.yml — ghi đè file cũ.
-#
-# ─────────────────────────────────────────────────────────────────────────
 # VÌ SAO BẢN 2 HỎNG — ĐO THẬT, KHÔNG SUY ĐOÁN
 #
 # Bản 2 thiết kế 4 lần/ngày, mỗi lần 5 tiếng, GỐI ĐẦU NHAU 1 TIẾNG. Đọc lịch
@@ -59,14 +55,11 @@
 #
 # VÀ VÌ SAO PHẢI TÁCH KHỎI an-hung-finance: repo kia chứa token FireAnt
 # hard-code, screener, vị thế đang nắm giữ — TUYỆT ĐỐI không mở công khai.
-# File này không có gì bí mật: chỉ một URL mà trình duyệt của bất kỳ ai vào web
-# cũng đã gọi công khai.
 #
 # CÁCH KIỂM (bằng HỆ QUẢ, không bằng màu xanh):
 #   Sáng hôm sau mở https://an-hung-finance-backend.onrender.com/api/cache/status
 #   Thức sẵn thì `updated` KHÁC "None" và `loading` là false.
 #   `updated: None` = backend vừa mới dậy, tức đêm qua đã ngủ.
-# ─────────────────────────────────────────────────────────────────────────
 
 name: Giu backend thuc
 
